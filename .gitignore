@@ -1,0 +1,24 @@
+# Arduino/PlatformIO build artifacts
+.pio/
+.vscode/
+.DS_Store
+*.o
+*.a
+*.elf
+*.bin
+*.map
+
+# IDE files
+*.code-workspace
+.idea/
+
+# Credentials (don't commit your actual config!)
+*_credentials.json
+*_secrets.h
+
+# Build directories
+build/
+dist/
+
+# OS files
+Thumbs.db
