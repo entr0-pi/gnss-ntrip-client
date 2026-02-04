@@ -1,6 +1,6 @@
 # ESP32 NTRIP Client – Test Plan (Patched)
 
-This document defines the **manual and semi-automated validation tests** for the ESP32 NTRIP v1 client using a Python-based fake caster.
+This document defines the **manual and semi-automated validation tests** for the ESP32 NTRIP v1 client using the Python-based fake caster (`ESP32_NTRIP_Fake_Caster.py`).
 
 This **patched version** corrects minor inconsistencies and adds missing coverage identified during review:
 - Clarifies that HTTP 404 testing validates *server response handling*, not mount mismatch routing
@@ -29,7 +29,7 @@ Default values used below:
 ## Test 1 — Happy Path / Stream Validation
 
 ```bash
-python fake_caster.py   --mode ok   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode ok   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
 ```
 
 **Objective**
@@ -47,7 +47,7 @@ python fake_caster.py   --mode ok   --mount MOUNT   --user user   --password pas
 ## Test 2 — HTTP Header Draining (ASCII Leakage Test)
 
 ```bash
-python fake_caster.py   --mode ok_headers   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode ok_headers   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
 ```
 
 **Objective**
@@ -63,7 +63,7 @@ python fake_caster.py   --mode ok_headers   --mount MOUNT   --user user   --pass
 ## Test 3 — Authentication Failure (401)
 
 ```bash
-python fake_caster.py   --mode unauth   --mount MOUNT
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode unauth   --mount MOUNT
 ```
 
 **Objective**
@@ -80,7 +80,7 @@ python fake_caster.py   --mode unauth   --mount MOUNT
 ## Test 4 — HTTP 404 Handling (Mount Not Found Response)
 
 ```bash
-python fake_caster.py   --mode nomount   --mount MOUNT   --user user   --password pass
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode nomount   --mount MOUNT   --user user   --password pass
 ```
 
 **Objective**
@@ -98,7 +98,7 @@ python fake_caster.py   --mode nomount   --mount MOUNT   --user user   --passwor
 ## Test 5 — Mount Mismatch Routing
 
 ```bash
-python fake_caster.py   --mode ok   --mount EXPECTED_MOUNT   --user user   --password pass   --rtcm rtcm.bin
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode ok   --mount EXPECTED_MOUNT   --user user   --password pass   --rtcm rtcm.bin
 ```
 
 **Procedure**
@@ -117,7 +117,7 @@ python fake_caster.py   --mode ok   --mount EXPECTED_MOUNT   --user user   --pas
 ## Test 6 — TCP Segmentation Torture (Parser Robustness)
 
 ```bash
-python fake_caster.py   --mode ok   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode ok   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
 ```
 
 **Objective**
@@ -133,7 +133,7 @@ python fake_caster.py   --mode ok   --mount MOUNT   --user user   --password pas
 ## Test 7 — CRC Corruption Handling
 
 ```bash
-python fake_caster.py   --mode corrupt   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode corrupt   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
 ```
 
 **Objective**
@@ -149,7 +149,7 @@ python fake_caster.py   --mode corrupt   --mount MOUNT   --user user   --passwor
 ## Test 8 — Zombie Stream Detection (Silent Stall)
 
 ```bash
-python fake_caster.py   --mode stall   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode stall   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
 ```
 
 **Objective**
@@ -164,7 +164,7 @@ python fake_caster.py   --mode stall   --mount MOUNT   --user user   --password 
 ## Test 9 — Abrupt Connection Drop
 
 ```bash
-python fake_caster.py   --mode drop   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode drop   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
 ```
 
 **Objective**
@@ -180,7 +180,7 @@ python fake_caster.py   --mode drop   --mount MOUNT   --user user   --password p
 ## Test 10 — Junk Data Before RTCM
 
 ```bash
-python fake_caster.py   --mode junk   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode junk   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
 ```
 
 **Objective**
@@ -196,7 +196,7 @@ python fake_caster.py   --mode junk   --mount MOUNT   --user user   --password p
 ## Test 11 — HTTP 500 Server Error Handling
 
 ```bash
-python fake_caster.py   --mode servererr   --mount MOUNT   --user user   --password pass
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode servererr   --mount MOUNT   --user user   --password pass
 ```
 
 **Objective**
@@ -212,7 +212,7 @@ python fake_caster.py   --mode servererr   --mount MOUNT   --user user   --passw
 ## Test 12 — Hot Configuration Reload During Streaming
 
 ```bash
-python fake_caster.py   --mode ok   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
+python tests/ESP32_NTRIP_Fake_Caster.py   --mode ok   --mount MOUNT   --user user   --password pass   --rtcm rtcm.bin
 ```
 
 **Procedure**

@@ -1,37 +1,45 @@
 # Package Structure
 
 ```
-NtripClient_Enhanced/
+gnss-ntrip-client/
 │
-├── src/                          # Core library files
-│   ├── NtripClient.h             # Main client header with API
-│   ├── NtripClient.cpp           # Client implementation
-│   ├── RtcmParser.h              # RTCM frame parser header
-│   └── RtcmParser.cpp            # Parser implementation
+├── lib/
+│   └── ntrip-client/             # Core library (PlatformIO/Arduino)
+│       ├── include/
+│       │   ├── NtripClient.h      # Main client header with API
+│       │   └── RtcmParser.h       # RTCM frame parser header
+│       └── src/
+│           ├── NtripClient.cpp    # Client implementation
+│           └── RtcmParser.cpp     # Parser implementation
 │
-├── examples/                     # Example sketches
+├── examples/                     # Example sketches (C++)
 │   ├── minimal/
-│   │   └── minimal.ino           # Bare minimum code (~40 lines)
+│   │   └── minimal.cpp            # Bare minimum code (~40 lines)
 │   ├── basic/
-│   │   └── main.ino              # JSON config with monitoring
-│   └── advanced/
-│       └── advanced.ino          # Full diagnostics & error handling
+│   │   └── main.cpp               # JSON config with monitoring
+│   ├── advanced/
+│   │   └── advanced.cpp           # Full diagnostics & error handling
+│   └── production/
+│       └── main.cpp               # Production-ready template
 │
-├── docs/                         # Documentation
-│   └── CONFIGURATION.md          # Detailed config guide
+├── docs/                          # Documentation
+│   └── CONFIGURATION.md           # Detailed config guide
 │
-├── README.md                     # Main documentation
-├── QUICKSTART.md                 # 5-minute getting started guide
-├── CHANGELOG.md                  # Version history
-├── LICENSE                       # MIT license
-├── library.properties            # Arduino Library Manager metadata
-├── keywords.txt                  # Arduino IDE syntax highlighting
-└── .gitignore                    # Git ignore rules
+├── tests/
+│   ├── ESP32_NTRIP_Fake_Caster.py # Python fake caster
+│   └── ESP32_NTRIP_Test_Plan.md   # Manual/automated test plan
+│
+├── README.md                      # Main documentation
+├── QUICKSTART.md                  # 5-minute getting started guide
+├── LICENSE                        # MIT license
+├── library.properties             # Arduino Library Manager metadata
+├── keywords.txt                   # Arduino IDE syntax highlighting
+└── platformio.ini                 # PlatformIO configuration
 ```
 
 ## File Descriptions
 
-### Core Library (`src/`)
+### Core Library (`lib/ntrip-client/`)
 
 **NtripClient.h/cpp** - Main NTRIP client
 - Connection management & state machine
@@ -48,22 +56,28 @@ NtripClient_Enhanced/
 
 ### Examples
 
-**minimal.ino** (40 lines)
+**minimal.cpp** (40 lines)
 - Simplest possible implementation
 - WiFi + NTRIP in under 50 lines
 - Perfect for testing or embedding
 
-**main.ino** (200 lines)
+**main.cpp** (200 lines)
 - JSON configuration from LittleFS
 - Hot-reload on config changes
 - Multi-task architecture
 - Production-ready template
 
-**advanced.ino** (150 lines)
+**advanced.cpp** (150 lines)
 - Real-time statistics display
 - Error handling examples
 - RTCM message name lookup
-- Auto-reset lockout logic
+- Dynamic configuration updates
+
+**production/main.cpp**
+- Production-ready template with monitoring
+- JSON configuration with hot-reload
+- Lockout state persistence
+- Multi-core task architecture
 
 ### Documentation
 
@@ -85,16 +99,11 @@ NtripClient_Enhanced/
 - GNSS receiver setup
 - Advanced configurations
 
-**CHANGELOG.md**
-- Version history
-- Breaking changes
-- Bug fixes & improvements
-
 ## Installation Methods
 
 ### Method 1: Arduino Library Manager
 1. Sketch → Include Library → Add .ZIP Library
-2. Select `NtripClient_Enhanced_v2.0.zip`
+2. Select the downloaded ZIP for this repository
 3. Library appears in Sketch → Include Library
 
 ### Method 2: Manual Installation
@@ -105,7 +114,7 @@ NtripClient_Enhanced/
 ### Method 3: PlatformIO
 ```ini
 lib_deps = 
-    NtripClient_Enhanced
+    ntrip-client
     bblanchon/ArduinoJson@^6.21.0
 ```
 
