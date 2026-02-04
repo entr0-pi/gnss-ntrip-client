@@ -17,6 +17,12 @@ Copy this repository to your Arduino libraries directory:
 
 Or extract the ZIP directly into that folder.
 
+For PlatformIO projects, copy the library into `lib/ntrip-client/` so the layout matches:
+```
+lib/ntrip-client/include/NtripClient.h
+lib/ntrip-client/src/NtripClient.cpp
+```
+
 ## Step 3: Find a Mount Point
 
 Visit http://rtk2go.com:2101 in your browser to see available stations. Or any other v1 Caster
@@ -39,8 +45,8 @@ GND        →    GND
 
 ## Step 5: Upload the Minimal Example
 
-1. Open Arduino IDE
-2. File → Examples → NtripClient_Enhanced → minimal
+1. Open the example at `examples/minimal/minimal.cpp` (PlatformIO) or copy its contents into a new Arduino sketch.
+2. Update WiFi and mount values:
 3. Edit these lines:
    ```cpp
    const char* WIFI_SSID = "YourWiFiName";

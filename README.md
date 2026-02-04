@@ -1,4 +1,4 @@
-# NTRIP Client v2.0 - Production Ready
+# NTRIP Client v2.0.0 - Production Ready
 
 A robust, production-ready NTRIP client for ESP32 that streams RTK correction data to GNSS receivers with advanced health monitoring, error handling, and diagnostics.
 
@@ -37,15 +37,19 @@ Default Serial2 pins (configurable in setup()):
 
 ### 1. Installation
 
-Copy the library files to your project:
+Copy the library files to your project (PlatformIO layout shown):
 ```
 YourProject/
-├── src/
-│   ├── NtripClient.h
-│   ├── NtripClient.cpp
-│   ├── RtcmParser.h
-│   └── RtcmParser.cpp
-└── main.ino
+├── lib/
+│   └── ntrip-client/
+│       ├── include/
+│       │   ├── NtripClient.h
+│       │   └── RtcmParser.h
+│       └── src/
+│           ├── NtripClient.cpp
+│           └── RtcmParser.cpp
+└── src/
+    └── main.ino
 ```
 
 ### 2. Basic Setup
