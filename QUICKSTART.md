@@ -5,7 +5,7 @@ Get RTK corrections flowing in 5 minutes! 🚀
 ## Step 1: Install Dependencies
 
 In Arduino IDE or PlatformIO, install:
-- **ArduinoJson** (v6 or v7)
+- **ArduinoJson** (v6 or v7) for the examples, not the library
 - ESP32 board support
 
 ## Step 2: Copy Library Files
@@ -19,7 +19,7 @@ Or extract the ZIP directly into that folder.
 
 ## Step 3: Find a Mount Point
 
-Visit http://rtk2go.com:2101 in your browser to see available stations.
+Visit http://rtk2go.com:2101 in your browser to see available stations. Or any other v1 Caster
 
 Choose one near you (within 50km is ideal). Note the:
 - Mount point name (e.g., `RTCM3_XYZ`)

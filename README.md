@@ -318,14 +318,6 @@ Common message types you'll see:
 
 MIT License - See LICENSE file for details
 
-## 🤝 Contributing
-
-Contributions welcome! Please:
-1. Test thoroughly on real hardware
-2. Follow existing code style
-3. Update documentation
-4. Add examples for new features
-
 ## 📮 Support
 
 For issues and questions:
