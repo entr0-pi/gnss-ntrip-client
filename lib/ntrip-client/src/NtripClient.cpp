@@ -2,9 +2,17 @@
 #include "RtcmParser.h"
 #include <base64.h>
 
+// Implementation notes:
+// - The task loop runs continuously on a FreeRTOS task.
+// - Two-phase validation is used:
+//   1) Strict validation: parse every byte and require N valid frames.
+//   2) Passive sampling: periodically scan for RTCM preamble to detect stalls.
+// - Health and stats are protected by mutexes for safe cross-task access.
+
 enum class StreamPhase { VALIDATION, STREAMING };
 
 bool NtripClient::begin(const NtripConfig& cfg, HardwareSerial& gnss) {
+  // Store configuration and GNSS serial reference, reset state, init mutexes.
   config = cfg;
   gnssSerial = &gnss;
   failures = 0;
@@ -27,15 +35,18 @@ bool NtripClient::begin(const NtripConfig& cfg, HardwareSerial& gnss) {
 }
 
 void NtripClient::startTask(uint8_t core) {
+  // Start FreeRTOS task pinned to the requested core.
   xTaskCreatePinnedToCore(taskEntry, "NtripClient", 8192, this, 1, nullptr, core);
   Serial.printf("[NtripClient] Task started on core %d\n", core);
 }
 
 void NtripClient::taskEntry(void* arg) {
+  // Static trampoline used by FreeRTOS.
   static_cast<NtripClient*>(arg)->taskLoop();
 }
 
 void NtripClient::taskLoop() {
+  // Main state machine: connect, validate, stream, monitor, and recover.
   RtcmParser parser;
   StreamPhase phase = StreamPhase::VALIDATION;
 
@@ -56,6 +67,7 @@ void NtripClient::taskLoop() {
   for (;;) {
 
     if (_state == NtripState::DISCONNECTED) {
+      // Safe point to refresh config and apply new tuning parameters.
       // Take fresh config snapshot when disconnected (safe boundary)
       if (xSemaphoreTake(configMutex, pdMS_TO_TICKS(100))) {
         localConfig = config;
@@ -67,6 +79,7 @@ void NtripClient::taskLoop() {
         continue;
       }
       if (failures >= localConfig.maxTries) {
+        // Lock out after exceeding max tries; user must reset/reconnect.
         setError(NtripError::MAX_RETRIES_EXCEEDED,
                  String("Failed ") + failures + " times");
         _state = NtripState::LOCKED_OUT;
@@ -76,12 +89,14 @@ void NtripClient::taskLoop() {
     }
 
     if (_state == NtripState::CONNECTING) {
+      // Attempt TCP + HTTP connection to the caster.
       lastAttempt = millis();
       Serial.printf("[NtripClient] Connecting to %s:%d/%s (attempt %d/%d)\n",
                     localConfig.host.c_str(), localConfig.port, localConfig.mount.c_str(),
                     failures + 1, localConfig.maxTries);
       
       if (connectCaster(localConfig)) {
+        // Connection established; enter validation phase.
         failures = 0;
         parser.reset();
         validFrames = 0;
@@ -107,7 +122,7 @@ void NtripClient::taskLoop() {
     }
     
     if (_state == NtripState::STREAMING) {
-      
+      // Stream handling and health checks.
       if (!client.connected()) {
         Serial.println(F("[NtripClient] Connection lost"));
         setError(NtripError::TCP_CONNECT_FAILED, "Socket closed by server");
@@ -128,6 +143,7 @@ void NtripClient::taskLoop() {
         gnssSerial->write(buffer, n);
         
         if (phase == StreamPhase::VALIDATION) {
+          // Strict validation of RTCM frames until required count is reached.
           // PHASE 1: Strict validation - parse every byte
           for (int i = 0; i < n; i++) {
             RtcmResult result = parser.feed(buffer[i]);
@@ -163,6 +179,7 @@ void NtripClient::taskLoop() {
             }
           }
         } else {
+          // Passive sampling to detect "zombie" streams without full parsing.
           // PHASE 2: Passive sampling - check buffer periodically for RTCM preamble
           if (millis() - lastSampleTime > localConfig.passiveSampleMs) {
             bool foundPreamble = false;
@@ -211,6 +228,7 @@ void NtripClient::taskLoop() {
     }
     
     if (_state == NtripState::LOCKED_OUT) {
+      // Stay idle until user calls reset()/reconnect().
       disconnect();
       vTaskDelay(pdMS_TO_TICKS(5000));
     }
@@ -222,6 +240,7 @@ void NtripClient::taskLoop() {
 }
 
 bool NtripClient::connectCaster(const NtripConfig& cfg) {
+  // Open TCP connection and send NTRIP HTTP request with Basic auth.
   if (!client.connect(cfg.host.c_str(), cfg.port, cfg.connectTimeoutMs)) {
     setError(NtripError::TCP_CONNECT_FAILED,
              "Cannot reach " + cfg.host + ":" + cfg.port);
@@ -258,6 +277,7 @@ bool NtripClient::connectCaster(const NtripConfig& cfg) {
 
   if (line.startsWith("ICY 200") || line.startsWith("HTTP/1.1 200") ||
       line.startsWith("HTTP/1.0 200")) {
+    // Drain headers to avoid forwarding ASCII to GNSS.
     // Drain remaining HTTP headers until empty line (header/body separator)
     // This prevents ASCII header bytes from being forwarded to the GNSS receiver
     unsigned long drainStart = millis();
@@ -295,12 +315,14 @@ bool NtripClient::connectCaster(const NtripConfig& cfg) {
 }
 
 void NtripClient::disconnect() {
+  // Close socket and reset health/state.
   if (client.connected()) client.stop();
   _healthy = false;
   _state = NtripState::DISCONNECTED;
 }
 
 void NtripClient::setError(NtripError err, const String& msg) {
+  // Record error in stats for external inspection.
   if (xSemaphoreTake(statsMutex, portMAX_DELAY)) {
     _stats.lastError = err;
     _stats.lastErrorMessage = msg;
@@ -310,18 +332,22 @@ void NtripClient::setError(NtripError err, const String& msg) {
 }
 
 bool NtripClient::isStreaming() const { 
+  // True when actively streaming (may still be unhealthy).
   return _state == NtripState::STREAMING; 
 }
 
 bool NtripClient::isHealthy() const { 
+  // True when validation has passed and recent data is flowing.
   return _healthy; 
 }
 
 NtripState NtripClient::state() const { 
+  // Current connection state.
   return _state; 
 }
 
 NtripStats NtripClient::getStats() const {
+  // Snapshot stats under mutex.
   NtripStats stats;
   if (xSemaphoreTake(statsMutex, portMAX_DELAY)) {
     stats = _stats;
@@ -331,6 +357,7 @@ NtripStats NtripClient::getStats() const {
 }
 
 NtripError NtripClient::getLastError() const {
+  // Return last error code.
   NtripError err = NtripError::NONE;
   if (xSemaphoreTake(statsMutex, portMAX_DELAY)) {
     err = _stats.lastError;
@@ -340,6 +367,7 @@ NtripError NtripClient::getLastError() const {
 }
 
 String NtripClient::getErrorMessage() const {
+  // Return last error message.
   String msg;
   if (xSemaphoreTake(statsMutex, portMAX_DELAY)) {
     msg = _stats.lastErrorMessage;
@@ -349,6 +377,7 @@ String NtripClient::getErrorMessage() const {
 }
 
 void NtripClient::stop() {
+  // Force lockout by setting failures to maxTries.
   disconnect();
   if (xSemaphoreTake(configMutex, portMAX_DELAY)) {
     failures = config.maxTries;
@@ -359,6 +388,7 @@ void NtripClient::stop() {
 }
 
 void NtripClient::reset() {
+  // Clear lockout and error status; reconnect will happen on next loop.
   failures = 0;
   _state = NtripState::DISCONNECTED;
   
@@ -372,6 +402,7 @@ void NtripClient::reset() {
 }
 
 void NtripClient::reconnect() {
+  // Force immediate retry by clearing lastAttempt.
   disconnect();
   lastAttempt = 0;  // Force immediate retry
   Serial.println(F("[NtripClient] Reconnection requested"));

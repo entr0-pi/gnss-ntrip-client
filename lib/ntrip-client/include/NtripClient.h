@@ -2,10 +2,21 @@
 #include <WiFiClient.h>
 #include <Arduino.h>
 
+// NtripClient: lightweight NTRIP (Networked Transport of RTCM via Internet Protocol)
+// client intended for embedded targets. It connects to an NTRIP caster, streams
+// RTCM correction data to a GNSS receiver, and monitors stream health.
+//
+// Tuning notes:
+// - retryDelayMs / maxTries: trade faster recovery vs. network/caster load.
+// - healthTimeoutMs / passiveSampleMs / requiredValidFrames: trade sensitivity
+//   to stalled streams vs. tolerance to intermittent data.
+// - bufferSize: trade RAM vs. ability to read larger bursts without overflow.
+// - connectTimeoutMs: trade faster failover vs. tolerance to slow networks.
+
 // Version information
 #define NTRIP_CLIENT_VERSION "2.0.0"
 
-// Configuration structure
+// Configuration structure for connection, validation, and recovery behavior.
 struct NtripConfig {
   String host;
   uint16_t port = 2101;
@@ -15,6 +26,12 @@ struct NtripConfig {
   uint8_t maxTries = 5;
   
   // Advanced settings (optional)
+  // retryDelayMs: delay between connection attempts when disconnected.
+  // healthTimeoutMs: time without valid RTCM before declaring "zombie" stream.
+  // passiveSampleMs: how often to scan for RTCM preamble once validated.
+  // requiredValidFrames: number of valid frames required to accept a stream.
+  // bufferSize: read buffer size for TCP data bursts.
+  // connectTimeoutMs: TCP connect and HTTP response timeout.
   uint32_t retryDelayMs = 30000;      // Time between retry attempts
   uint32_t healthTimeoutMs = 60000;   // Zombie stream detection timeout
   uint32_t passiveSampleMs = 5000;    // Passive health check interval
@@ -126,10 +143,15 @@ public:
   void reconnect();
 
 private:
+  // FreeRTOS task entry point.
   static void taskEntry(void* arg);
+  // Main loop handling connect, stream validation, and health checks.
   void taskLoop();
+  // Establish TCP connection and validate HTTP response.
   bool connectCaster(const NtripConfig& cfg);
+  // Close socket and move to DISCONNECTED state.
   void disconnect();
+  // Store error code/message in stats (thread-safe).
   void setError(NtripError err, const String& msg);
   
   WiFiClient client;

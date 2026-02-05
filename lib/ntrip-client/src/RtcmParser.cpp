@@ -1,8 +1,10 @@
 #include "RtcmParser.h"
 
+// CRC24Q polynomial used by RTCM 3.x.
 static constexpr uint32_t CRC24Q_POLY = 0x1864CFB;
 
 uint32_t RtcmParser::crc24q(uint32_t crc, uint8_t byte) {
+  // Bitwise CRC update for a single byte.
   crc ^= (uint32_t)byte << 16;
   for (int i = 0; i < 8; i++)
     crc = (crc & 0x800000) ? (crc << 1) ^ CRC24Q_POLY : (crc << 1);
@@ -10,6 +12,7 @@ uint32_t RtcmParser::crc24q(uint32_t crc, uint8_t byte) {
 }
 
 uint16_t RtcmParser::extractMessageType() {
+  // Extract 12-bit message type from the payload header.
   // RTCM 3.x message type is the first 12 bits of the payload:
   //   Byte 0: message type bits [11:4] (all 8 bits)
   //   Byte 1: message type bits [3:0] in upper nibble (bits 7-4)
@@ -23,10 +26,12 @@ uint16_t RtcmParser::extractMessageType() {
 }
 
 RtcmResult RtcmParser::feed(uint8_t b) {
+  // Parse a byte stream into RTCM frames; returns a valid result on frame end.
   RtcmResult result;
   
   switch (state) {
     case SYNC:
+      // Wait for preamble 0xD3.
       if (b == 0xD3) {
         crc = crc24q(0, b);
         state = LEN1;
@@ -34,12 +39,14 @@ RtcmResult RtcmParser::feed(uint8_t b) {
       break;
       
     case LEN1:
+      // First length byte: top 2 bits carry payload length bits [9:8].
       length = (b & 0x03) << 8;
       crc = crc24q(crc, b);
       state = LEN2;
       break;
       
     case LEN2:
+      // Second length byte: payload length bits [7:0].
       length |= b;
       crc = crc24q(crc, b);
       index = 0;
@@ -47,6 +54,7 @@ RtcmResult RtcmParser::feed(uint8_t b) {
       break;
       
     case PAYLOAD:
+      // Payload collection; buffer first bytes for message type extraction.
       // Store first 12 bytes for message type extraction
       if (index < sizeof(payloadBuf)) {
         payloadBuf[index] = b;
@@ -60,6 +68,7 @@ RtcmResult RtcmParser::feed(uint8_t b) {
       break;
       
     case CRC:
+      // Collect 3-byte CRC and compare with computed value.
       crcBuf[index++] = b;
       if (index >= 3) {
         uint32_t recv = ((uint32_t)crcBuf[0] << 16) |
@@ -84,6 +93,7 @@ RtcmResult RtcmParser::feed(uint8_t b) {
 }
 
 void RtcmParser::reset() {
+  // Reset parser state for next frame.
   state = SYNC;
   length = 0;
   index = 0;
@@ -91,6 +101,7 @@ void RtcmParser::reset() {
 }
 
 const char* RtcmParser::getStateName() const {
+  // Human-readable state name for debugging.
   switch (state) {
     case SYNC: return "SYNC";
     case LEN1: return "LEN1";
