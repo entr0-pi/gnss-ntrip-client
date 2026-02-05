@@ -1,4 +1,4 @@
-# NTRIP Client v2.0.0 - Production Ready
+# NTRIP Client Rev1 - Production Ready
 
 A robust, production-ready NTRIP client for ESP32 that streams RTK correction data to GNSS receivers with advanced health monitoring, error handling, and diagnostics.
 
