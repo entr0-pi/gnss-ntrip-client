@@ -11,27 +11,41 @@
 
 enum class StreamPhase { VALIDATION, STREAMING };
 
-bool NtripClient::begin(const NtripConfig& cfg, HardwareSerial& gnss) {
-  // Store configuration and GNSS serial reference, reset state, init mutexes.
-  config = cfg;
-  gnssSerial = &gnss;
-  failures = 0;
-  _healthy = false;
-  _state = NtripState::DISCONNECTED;
-  
-  // Create mutexes for thread-safe access
+bool NtripClient::ensureMutexes() const {
   if (statsMutex == nullptr) {
     statsMutex = xSemaphoreCreateMutex();
   }
   if (configMutex == nullptr) {
     configMutex = xSemaphoreCreateMutex();
   }
-  
+  if (statsMutex == nullptr || configMutex == nullptr) {
+    Serial.println(F("[NtripClient] ERROR: failed to create mutexes"));
+    return false;
+  }
+  return true;
+}
+
+bool NtripClient::begin(const NtripConfig& cfg, Print& gnss) {
+  // Store configuration and GNSS serial reference, reset state, init mutexes.
+  config = cfg;
+  gnssOutput = &gnss;
+  failures = 0;
+  _healthy = false;
+  _state = NtripState::DISCONNECTED;
+
+  if (!ensureMutexes()) {
+    return false;
+  }
+
   // Reset statistics
   _stats = NtripStats();
-  
+
   Serial.println(F("[NtripClient] Initialized"));
   return true;
+}
+
+bool NtripClient::begin(const NtripConfig& cfg, HardwareSerial& gnss) {
+  return begin(cfg, static_cast<Print&>(gnss));
 }
 
 void NtripClient::startTask(uint8_t core) {
@@ -54,7 +68,7 @@ void NtripClient::taskLoop() {
   NtripConfig localConfig;
 
   // Copy initial config under mutex protection
-  if (xSemaphoreTake(configMutex, portMAX_DELAY)) {
+  if (ensureMutexes() && xSemaphoreTake(configMutex, portMAX_DELAY)) {
     localConfig = config;
     xSemaphoreGive(configMutex);
   }
@@ -69,7 +83,7 @@ void NtripClient::taskLoop() {
     if (_state == NtripState::DISCONNECTED) {
       // Safe point to refresh config and apply new tuning parameters.
       // Take fresh config snapshot when disconnected (safe boundary)
-      if (xSemaphoreTake(configMutex, pdMS_TO_TICKS(100))) {
+      if (ensureMutexes() && xSemaphoreTake(configMutex, pdMS_TO_TICKS(100))) {
         localConfig = config;
         xSemaphoreGive(configMutex);
       }
@@ -106,7 +120,7 @@ void NtripClient::taskLoop() {
         _healthy = false;
         _state = NtripState::STREAMING;
         
-        if (xSemaphoreTake(statsMutex, portMAX_DELAY)) {
+        if (ensureMutexes() && xSemaphoreTake(statsMutex, portMAX_DELAY)) {
           _stats.reconnects++;
           _stats.connectionStart = millis();
           _stats.lastError = NtripError::NONE;
@@ -134,13 +148,15 @@ void NtripClient::taskLoop() {
       if (n > 0) {
         
         // Update statistics
-        if (xSemaphoreTake(statsMutex, pdMS_TO_TICKS(10))) {
+        if (ensureMutexes() && xSemaphoreTake(statsMutex, pdMS_TO_TICKS(10))) {
           _stats.bytesReceived += n;
           xSemaphoreGive(statsMutex);
         }
         
         // FAST PATH: Write to GNSS immediately
-        gnssSerial->write(buffer, n);
+        if (gnssOutput) {
+          gnssOutput->write(buffer, n);
+        }
         
         if (phase == StreamPhase::VALIDATION) {
           // Strict validation of RTCM frames until required count is reached.
@@ -153,7 +169,7 @@ void NtripClient::taskLoop() {
               lastHealth = millis();
               
               // Update statistics
-              if (xSemaphoreTake(statsMutex, pdMS_TO_TICKS(10))) {
+              if (ensureMutexes() && xSemaphoreTake(statsMutex, pdMS_TO_TICKS(10))) {
                 _stats.totalFrames++;
                 _stats.lastMessageType = result.messageType;
                 _stats.lastFrameTime = millis();
@@ -172,7 +188,7 @@ void NtripClient::taskLoop() {
                 break;
               }
             } else if (result.crcError) {
-              if (xSemaphoreTake(statsMutex, pdMS_TO_TICKS(10))) {
+              if (ensureMutexes() && xSemaphoreTake(statsMutex, pdMS_TO_TICKS(10))) {
                 _stats.crcErrors++;
                 xSemaphoreGive(statsMutex);
               }
@@ -194,7 +210,7 @@ void NtripClient::taskLoop() {
                 _healthy = true;
                 lastSampleTime = millis();
 
-                if (xSemaphoreTake(statsMutex, pdMS_TO_TICKS(10))) {
+                if (ensureMutexes() && xSemaphoreTake(statsMutex, pdMS_TO_TICKS(10))) {
                   _stats.lastFrameTime = millis();
                   xSemaphoreGive(statsMutex);
                 }
@@ -219,7 +235,7 @@ void NtripClient::taskLoop() {
       }
       
       // Update total uptime
-      if (xSemaphoreTake(statsMutex, pdMS_TO_TICKS(10))) {
+      if (ensureMutexes() && xSemaphoreTake(statsMutex, pdMS_TO_TICKS(10))) {
         if (_stats.connectionStart > 0) {
           _stats.totalUptime = millis() - _stats.connectionStart;
         }
@@ -323,7 +339,7 @@ void NtripClient::disconnect() {
 
 void NtripClient::setError(NtripError err, const String& msg) {
   // Record error in stats for external inspection.
-  if (xSemaphoreTake(statsMutex, portMAX_DELAY)) {
+  if (ensureMutexes() && xSemaphoreTake(statsMutex, portMAX_DELAY)) {
     _stats.lastError = err;
     _stats.lastErrorMessage = msg;
     xSemaphoreGive(statsMutex);
@@ -349,9 +365,11 @@ NtripState NtripClient::state() const {
 NtripStats NtripClient::getStats() const {
   // Snapshot stats under mutex.
   NtripStats stats;
-  if (xSemaphoreTake(statsMutex, portMAX_DELAY)) {
+  if (ensureMutexes() && xSemaphoreTake(statsMutex, portMAX_DELAY)) {
     stats = _stats;
     xSemaphoreGive(statsMutex);
+  } else {
+    stats = _stats;
   }
   return stats;
 }
@@ -359,9 +377,11 @@ NtripStats NtripClient::getStats() const {
 NtripError NtripClient::getLastError() const {
   // Return last error code.
   NtripError err = NtripError::NONE;
-  if (xSemaphoreTake(statsMutex, portMAX_DELAY)) {
+  if (ensureMutexes() && xSemaphoreTake(statsMutex, portMAX_DELAY)) {
     err = _stats.lastError;
     xSemaphoreGive(statsMutex);
+  } else {
+    err = _stats.lastError;
   }
   return err;
 }
@@ -369,9 +389,11 @@ NtripError NtripClient::getLastError() const {
 String NtripClient::getErrorMessage() const {
   // Return last error message.
   String msg;
-  if (xSemaphoreTake(statsMutex, portMAX_DELAY)) {
+  if (ensureMutexes() && xSemaphoreTake(statsMutex, portMAX_DELAY)) {
     msg = _stats.lastErrorMessage;
     xSemaphoreGive(statsMutex);
+  } else {
+    msg = _stats.lastErrorMessage;
   }
   return msg;
 }
@@ -379,7 +401,7 @@ String NtripClient::getErrorMessage() const {
 void NtripClient::stop() {
   // Force lockout by setting failures to maxTries.
   disconnect();
-  if (xSemaphoreTake(configMutex, portMAX_DELAY)) {
+  if (ensureMutexes() && xSemaphoreTake(configMutex, portMAX_DELAY)) {
     failures = config.maxTries;
     xSemaphoreGive(configMutex);
   }
@@ -392,7 +414,7 @@ void NtripClient::reset() {
   failures = 0;
   _state = NtripState::DISCONNECTED;
   
-  if (xSemaphoreTake(statsMutex, portMAX_DELAY)) {
+  if (ensureMutexes() && xSemaphoreTake(statsMutex, portMAX_DELAY)) {
     _stats.lastError = NtripError::NONE;
     _stats.lastErrorMessage = "";
     xSemaphoreGive(statsMutex);
