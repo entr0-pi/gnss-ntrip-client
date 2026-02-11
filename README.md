@@ -1,340 +1,119 @@
-# NTRIP Client Rev1 - Production Ready
+# ntrip-client
 
-A robust, production-ready NTRIP client for ESP32 that streams RTK correction data to GNSS receivers with advanced health monitoring, error handling, and diagnostics.
+Embedded NTRIP client library for ESP32/Arduino targets.
 
-## 🌟 Features
+Connects to an NTRIP caster, validates RTCM stream quality, forwards corrections to a `Print` output (typically GNSS UART), and handles reconnect/lockout logic.
 
-- **Two-Phase Stream Validation**: Strict startup validation followed by efficient passive monitoring
-- **Comprehensive Error Handling**: Detailed error codes and messages for all failure modes
-- **Thread-Safe Statistics**: Real-time metrics on frames, bytes, uptime, and errors
-- **Auto-Reconnection**: Smart retry logic with exponential backoff and lockout protection
-- **RTCM Message Detection**: Identifies RTCM message types (1005, 1077, MSM7, etc.)
-- **JSON Configuration**: Hot-reload configuration without restart
-- **Zombie Stream Detection**: Automatically reconnects on dead connections
-- **Multi-Core Architecture**: NTRIP processing on Core 0, monitoring on Core 1
-- **Flash Wear Protection**: Only writes to LittleFS when values actually change
+## Features
 
-## 📋 Requirements
+- NTRIP Rev2 with automatic fallback to Rev1 (compile-time toggle)
+- Two-phase stream validation: strict RTCM parsing at startup, passive preamble sampling at steady state
+- Zombie stream detection
+- Lockout after repeated failures with reset/reconnect API
+- Config validation at `begin()` with actionable error messages
+- Runtime stats with batched updates (low mutex contention)
+- Task lifecycle control: `startTask()` / `stopTask()` with duplicate-spawn protection
+- Output abstraction via `Print`
+- Logger callback injection (silent by default)
 
-### Hardware
-- ESP32 (any variant)
-- GNSS receiver (ZED-F9P, M8P, etc.) connected via Serial2
+## Thread-safety contract
 
-### Software Dependencies
+- `begin()`, `startTask()`, `stopTask()` must be called from the same context (typically Arduino setup/loop). Never call `begin()` while the task is running.
+- Query methods — `state()`, `isStreaming()`, `isHealthy()`, `getStats()`, `getLastError()`, `getErrorMessage()` — are safe from any task.
+- Control methods — `stop()`, `reset()`, `reconnect()` — are safe from any task.
+- Scalar state uses `volatile` for lock-free single-writer access. `NtripStats` is protected by mutex.
+
+## Compile-time flags
+
+Override via build_flags (e.g. `-DNTRIP_CLIENT_ENABLE_TASK=0`):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `NTRIP_CLIENT_ENABLE_TASK` | `1` | Enable FreeRTOS background task. Set to `0` for non-RTOS targets. |
+| `NTRIP_CLIENT_ENABLE_REV1_FALLBACK` | `1` | Automatic Rev2 → Rev1 fallback on connection failure. |
+| `NTRIP_CLIENT_PASSIVE_SCAN_BYTES` | `128` | Bytes scanned for RTCM preamble during passive health checks. |
+
+## Public API
+
+Types in `include/NtripClient.h`:
+
+- `NtripConfig` — caster and behavior settings
+- `NtripState` — `DISCONNECTED | CONNECTING | STREAMING | LOCKED_OUT`
+- `NtripError` — failure categories (includes `INVALID_CONFIG`)
+- `NtripStats` — counters + last error/frame info
+- `NtripClient` — client class
+
+Methods:
+
+| Method | Description |
+|--------|-------------|
+| `begin(cfg, gnss)` | Initialize with config and output stream. Validates config. |
+| `startTask(core)` | Start FreeRTOS task. Returns `false` if already running. |
+| `stopTask()` | Signal task to stop, wait for clean exit, free resources. |
+| `isTaskRunning()` | Check if background task is active. |
+| `stop()` | Enter lockout state. |
+| `reset()` | Clear lockout, allow reconnection. |
+| `reconnect()` | Force immediate reconnection attempt. |
+| `state()` | Current `NtripState`. |
+| `isStreaming()` | True if actively streaming. |
+| `isHealthy()` | True if validated and receiving data. |
+| `getStats()` | Thread-safe stats snapshot. |
+| `getLastError()` | Last `NtripError` code. |
+| `getErrorMessage()` | Human-readable error string. |
+| `setLogger(fn)` | Inject log callback. Silent if unset. |
+| `validateConfig(cfg, err)` | Static config validation. |
+
+## Logger
+
+The library is logger-agnostic. Inject a callback to receive log messages:
+
 ```cpp
-#include <WiFi.h>          // ESP32 core
-#include <LittleFS.h>      // ESP32 core
-#include <ArduinoJson.h>   // v6.x or v7.x
-#include <base64.h>        // ESP32 base64 library
-```
-
-### Pin Configuration
-Default Serial2 pins (configurable in setup()):
-- RX: GPIO 16
-- TX: GPIO 17
-
-## 🚀 Quick Start
-
-### 1. Installation
-
-Copy the library files to your project (PlatformIO layout shown):
-```
-YourProject/
-├── lib/
-│   └── ntrip-client/
-│       ├── include/
-│       │   ├── NtripClient.h
-│       │   └── RtcmParser.h
-│       └── src/
-│           ├── NtripClient.cpp
-│           └── RtcmParser.cpp
-└── src/
-    └── main.ino
-```
-
-### 2. Basic Setup
-
-```cpp
-#include "NtripClient.h"
-
-NtripClient ntripClient;
-bool isInternetReachable = true; // Update this based on WiFi status
-
-void setup() {
-  Serial.begin(115200);
-  Serial2.begin(115200);
-  
-  NtripConfig config;
-  config.host = "rtk2go.com";
-  config.port = 2101;
-  config.mount = "YOUR_MOUNT";
-  config.user = "your_email@example.com";
-  config.pass = "none";
-  
-  ntripClient.begin(config, Serial2);
-  ntripClient.startTask(0); // Start on Core 0
+static void ntripLog(NtripLogLevel level, const char* tag, const char* message) {
+  Serial.printf("[%s] %s\n", tag, message);
 }
 
-void loop() {
-  if (ntripClient.isHealthy()) {
-    Serial.println("RTK corrections flowing!");
-  }
-  delay(1000);
+ntrip.setLogger(ntripLog);
+```
+
+If `setLogger()` is not called, the library is silent.
+
+## Configuration
+
+`NtripConfig` fields:
+
+| Field | Default | Notes |
+|-------|---------|-------|
+| `host`, `port`, `mount`, `user`, `pass` | — | Required (validated at `begin()`) |
+| `ggaSentence` | `""` | Optional GGA for Rev2 Ntrip-GGA header |
+| `maxTries` | `5` | Attempts before lockout |
+| `retryDelayMs` | `30000` | Lower = faster recovery, more load |
+| `healthTimeoutMs` | `60000` | Lower = faster zombie detection |
+| `passiveSampleMs` | `5000` | Passive health check interval |
+| `requiredValidFrames` | `3` | Higher = safer validation, slower start |
+| `bufferSize` | `1024` | Higher = handles bursts, uses more RAM |
+| `connectTimeoutMs` | `5000` | TCP + HTTP response timeout |
+
+## Integration pattern
+
+```cpp
+NtripClient ntrip;
+ntrip.setLogger(myLogCallback);
+
+NtripConfig cfg;
+cfg.host = "rtk2go.com";
+cfg.mount = "MY_MOUNT";
+// ... fill remaining fields ...
+
+if (!ntrip.begin(cfg, Serial2)) {
+  // handle error
 }
+ntrip.startTask(0);
+
+// Monitor from loop:
+// ntrip.state(), ntrip.isHealthy(), ntrip.getStats()
 ```
 
-### 3. Configuration File
+## Examples
 
-Create `/ntrip_config.json` on LittleFS:
-
-```json
-{
-  "ntrip": {
-    "enabled": true,
-    "host": "rtk2go.com",
-    "port": 2101,
-    "mount": "YOUR_MOUNT",
-    "user": "your_email@example.com",
-    "pass": "none",
-    "max_tries": 5,
-    "retry_delay_ms": 30000,
-    "health_timeout_ms": 60000,
-    "passive_sample_ms": 5000,
-    "required_valid_frames": 3,
-    "buffer_size": 1024,
-    "connect_timeout_ms": 5000
-  },
-  "lockout": {
-    "failed_attempts": 0,
-    "abandoned": false,
-    "last_config_hash": ""
-  }
-}
-```
-
-## 📊 API Reference
-
-### NtripClient Class
-
-#### Initialization
-```cpp
-bool begin(const NtripConfig& cfg, HardwareSerial& gnss);
-```
-Initialize client with configuration and GNSS serial port.
-
-#### Control Methods
-```cpp
-void startTask(uint8_t core = 0);    // Start processing task
-void stop();                          // Stop and enter lockout
-void reset();                         // Clear lockout state
-void reconnect();                     // Force immediate reconnect
-```
-
-#### Status Methods
-```cpp
-bool isStreaming() const;            // True if connected
-bool isHealthy() const;              // True if receiving valid RTCM
-NtripState state() const;            // Current state enum
-```
-
-#### Diagnostics
-```cpp
-NtripStats getStats() const;         // Get statistics
-NtripError getLastError() const;     // Get last error code
-String getErrorMessage() const;      // Get human-readable error
-```
-
-### NtripConfig Structure
-
-```cpp
-struct NtripConfig {
-  String host;                       // Caster hostname
-  uint16_t port;                     // Caster port (default 2101)
-  String mount;                      // Mount point name
-  String user;                       // Username
-  String pass;                       // Password
-  uint8_t maxTries;                  // Max retry attempts (default 5)
-  
-  // Advanced (optional)
-  uint32_t retryDelayMs;            // Retry interval (default 30000)
-  uint32_t healthTimeoutMs;         // Zombie timeout (default 60000)
-  uint32_t passiveSampleMs;         // Sample interval (default 5000)
-  uint8_t requiredValidFrames;      // Validation frames (default 3)
-  uint16_t bufferSize;              // Read buffer (default 1024)
-  uint32_t connectTimeoutMs;        // TCP timeout (default 5000)
-};
-```
-
-### NtripStats Structure
-
-```cpp
-struct NtripStats {
-  uint32_t totalFrames;             // Valid RTCM frames received
-  uint32_t crcErrors;               // Failed CRC checks
-  uint32_t bytesReceived;           // Total bytes from caster
-  uint32_t reconnects;              // Reconnection count
-  uint32_t totalUptime;             // Milliseconds streaming
-  uint16_t lastMessageType;         // Last RTCM message ID
-  unsigned long lastFrameTime;      // Last valid frame timestamp
-  unsigned long connectionStart;    // Connection start time
-  NtripError lastError;             // Last error code
-  String lastErrorMessage;          // Error description
-};
-```
-
-### NtripState Enum
-
-```cpp
-enum class NtripState {
-  DISCONNECTED,  // Not connected
-  CONNECTING,    // Attempting connection
-  STREAMING,     // Connected and streaming
-  LOCKED_OUT     // Too many failures, stopped
-};
-```
-
-### NtripError Enum
-
-```cpp
-enum class NtripError {
-  NONE,
-  TCP_CONNECT_FAILED,
-  HTTP_AUTH_FAILED,
-  HTTP_MOUNT_NOT_FOUND,
-  HTTP_TIMEOUT,
-  HTTP_UNKNOWN_ERROR,
-  STREAM_VALIDATION_FAILED,
-  ZOMBIE_STREAM_DETECTED,
-  MAX_RETRIES_EXCEEDED
-};
-```
-
-## 🔧 Advanced Usage
-
-### Custom Error Handling
-
-```cpp
-void loop() {
-  if (ntripClient.state() == NtripState::LOCKED_OUT) {
-    NtripError err = ntripClient.getLastError();
-    
-    switch(err) {
-      case NtripError::HTTP_AUTH_FAILED:
-        Serial.println("Check your username/password!");
-        break;
-      case NtripError::HTTP_MOUNT_NOT_FOUND:
-        Serial.println("Mount point doesn't exist!");
-        break;
-      default:
-        Serial.println(ntripClient.getErrorMessage());
-    }
-    
-    // Clear lockout after user intervention
-    delay(60000);
-    ntripClient.reset();
-  }
-}
-```
-
-### Real-Time Statistics Display
-
-```cpp
-void displayStats() {
-  NtripStats stats = ntripClient.getStats();
-  
-  Serial.printf("Uptime: %lu sec | Frames: %lu | Errors: %lu\n",
-                stats.totalUptime / 1000,
-                stats.totalFrames,
-                stats.crcErrors);
-  
-  Serial.printf("Last RTCM: %d (%lu ms ago)\n",
-                stats.lastMessageType,
-                millis() - stats.lastFrameTime);
-  
-  Serial.printf("Bandwidth: %.2f KB/s\n",
-                (float)stats.bytesReceived / stats.totalUptime);
-}
-```
-
-### Configuration Hot-Reload
-
-The included example automatically monitors the JSON file and restarts the client when configuration changes are detected.
-
-## 🎯 RTCM Message Types
-
-Common message types you'll see:
-
-| Type | Description |
-|------|-------------|
-| 1005 | Station coordinates (base position) |
-| 1074 | GPS MSM4 observations |
-| 1077 | GPS MSM7 observations (high precision) |
-| 1084 | GLONASS MSM4 |
-| 1087 | GLONASS MSM7 |
-| 1094 | Galileo MSM4 |
-| 1097 | Galileo MSM7 |
-| 1124 | BeiDou MSM4 |
-| 1127 | BeiDou MSM7 |
-| 1230 | GLONASS code-phase biases |
-
-## 📈 Performance Characteristics
-
-- **Latency**: <5ms from caster to GNSS (fast-path optimization)
-- **Memory**: ~8KB stack + 1KB buffer per connection
-- **CPU**: ~2% on Core 0 during streaming
-- **Validation Time**: Typically 100-500ms for 3 frames
-- **Recovery Time**: 30 seconds default retry interval
-
-## 🐛 Troubleshooting
-
-### "Connection failed" repeatedly
-- Check WiFi connectivity
-- Verify host/port are correct
-- Test with `telnet rtk2go.com 2101`
-
-### "HTTP 401 Authentication Failed"
-- Verify username/password
-- Some casters require email as username
-- Try password "none" (common for public casters)
-
-### "Mount point not found"
-- Check mount name spelling (case-sensitive)
-- Visit caster's source table (e.g., rtk2go.com:2101)
-
-### "Stream validated but no GPS fix"
-- Check GNSS receiver configuration
-- Ensure RTCM3 input is enabled
-- Verify UART connections (RX/TX not swapped)
-- Check baud rate matches (115200 default)
-
-### "Zombie stream detected"
-- Caster may be sending invalid data
-- Try different mount point
-- Check network stability
-
-## 🔒 Security Notes
-
-- Passwords are sent via HTTP Basic Auth (base64, not encrypted)
-- Use trusted networks or VPN for sensitive applications
-- Consider implementing HTTPS support for production
-
-## 📝 License
-
-MIT License - See LICENSE file for details
-
-## 📮 Support
-
-For issues and questions:
-- Check troubleshooting section
-- Review examples/
-- Open GitHub issue with logs
-
-## 🙏 Acknowledgments
-
-- RTCM SC-104 for the RTCM 3.x standard
-- ESP32 community for libraries and support
-- NTRIP caster operators (RTK2Go, etc.)
-
----
-
-**Made with ❤️ for the RTK/GNSS community**
+- `minimal` — bare minimum to get corrections flowing
+- `basic` — self-contained with WiFi, logger, stats, and error recovery
