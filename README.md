@@ -1,4 +1,4 @@
-# ntrip-client
+# NTRIP Client Rev2 - Production Ready
 
 Embedded NTRIP client library for ESP32/Arduino targets.
 
